@@ -1,0 +1,6 @@
+{
+  "name": "Wireless Touchpad",
+  "description": "An interactive, low-latency wireless touchpad and keyboard application that turns your mobile phone into a trackpad with multi-touch gestures and custom hotkey layouts for Windows control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
