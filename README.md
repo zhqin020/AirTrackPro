@@ -57,6 +57,7 @@ AirTrack Pro 是一款将智能手机转变为低延迟无线多功能触控板�
 pip install pyautogui websockets asyncio
 ```
 
+
 #### 步骤 2: 保存并运行物理接收端脚本
 1. 在电脑端的“连接实体电脑”模块中，点击 **“复制 Python 脚本”** 按钮。
 2. 在您的真实电脑中新建一个文本文件，命名为 `receiver.py`，并将复制的代码粘贴进去。
@@ -68,6 +69,28 @@ pip install pyautogui websockets asyncio
 
 #### 步骤 3: 体验全系统物理操控
 此时用手机浏览器扫码（或已连接的手机端），您在手机触控板上的滑动和在键盘上的打字，将直接变为您真实物理电脑上的鼠标、打字和滚轮操作！
+
+---
+
+## ⚡ 极速启动脚本 (Windows)
+
+为了方便 Windows 用户快速启动项目，本项目提供了一个 PowerShell 启动脚本 `mouseup.ps1`。
+
+### 运行方式：
+1. 以管理员权限或普通权限打开 PowerShell。
+2. 进入项目根目录：
+   ```powershell
+   cd e:\work\github\AirTrackPro
+   ```
+3. 运行启动脚本：
+   ```powershell
+   .\mouseup.ps1
+   ```
+4. 根据菜单提示选择您想启动的模块：
+   - **选项 1**：一键安装所需依赖，并在新窗口中同时启动 Node.js/Vite 服务器与 Python 接收端（推荐）。
+   - **选项 2**：仅启动 Node.js 开发服务器。
+   - **选项 3**：仅启动 Python 接收端（可指定自定义 PIN 码）。
+   - **选项 4**：仅进行依赖安装与环境初始化。
 
 ---
 

@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Monitor, 
-  Terminal, 
-  Copy, 
-  Check, 
-  Settings, 
-  RefreshCw, 
-  FileText, 
-  Palette, 
-  Radio, 
-  Cpu, 
-  Download, 
-  Clock, 
+import {
+  Monitor,
+  Terminal,
+  Copy,
+  Check,
+  Settings,
+  RefreshCw,
+  FileText,
+  Palette,
+  Radio,
+  Cpu,
+  Download,
+  Clock,
   Maximize2,
   Trash2,
   Undo2,
@@ -47,13 +47,13 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
   const [packetLogs, setPacketLogs] = useState<Array<{ id: string; type: string; payload: string; time: string }>>([]);
 
   // Windows State Manager
-  const [activeWindow, setActiveWindow] = useState<'notepad' | 'paint' | 'terminal' | 'console' | 'help' | null>('help');
+  const [activeWindow, setActiveWindow] = useState<'notepad' | 'paint' | 'terminal' | 'console' | 'help' | null>('console');
   const [minimizedWindows, setMinimizedWindows] = useState<Record<string, boolean>>({
-    notepad: false,
-    paint: false,
+    notepad: true,
+    paint: true,
     terminal: true,
     console: false,
-    help: false,
+    help: true,
   });
 
   // Notepad State
@@ -136,7 +136,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
 
     // Add packets to live telemetry debug console
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
-    
+
     let payloadDesc = '';
     if (event.type === 'move') {
       payloadDesc = `dx: ${event.dx.toFixed(1)}, dy: ${event.dy.toFixed(1)}`;
@@ -187,6 +187,28 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
       setLatencyHistory(prev => [...prev.slice(1), 0.8 + Math.random() * 0.9]);
     }
 
+    // Handle virtual desktop page scrolling
+    if (event.type === 'scroll') {
+      const activeWin = activeWindow;
+      if (activeWin) {
+        let scrollEl: HTMLElement | null = null;
+        if (activeWin === 'notepad') {
+          scrollEl = document.getElementById('win-notepad-textarea');
+        } else {
+          const winEl = document.querySelector(`[data-window-id="${activeWin}"]`);
+          if (winEl) {
+            scrollEl = winEl.querySelector('.overflow-y-auto');
+          }
+        }
+        if (scrollEl) {
+          // scrollEl.scrollTop increases when scrolling down
+          // event.dy is sent from phone client (positive = drag down/scroll up, negative = drag up/scroll down)
+          // We scroll by adding event.dy * 8 to scrollTop
+          scrollEl.scrollTop += event.dy * 8;
+        }
+      }
+    }
+
     // Handle mouse button clicks
     if (event.type === 'click') {
       const action = event.action || 'click';
@@ -223,14 +245,14 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
       }
 
       playClickSound('key');
-      
+
       const activeEl = document.activeElement as HTMLTextAreaElement | HTMLInputElement | null;
       if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
         const input = activeEl;
         const start = input.selectionStart ?? 0;
         const end = input.selectionEnd ?? 0;
         const val = input.value;
-        
+
         let newVal = val;
         let newCursorPos = start;
 
@@ -417,7 +439,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
       ctx.lineWidth = brushSize;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
+
       // If we don't have a clean last point inside canvas, just draw a dot at end
       if (cx1 >= 0 && cx1 <= canvasRect.width && cy1 >= 0 && cy1 <= canvasRect.height) {
         ctx.moveTo(cx1, cy1);
@@ -454,7 +476,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
         }
         currentEl = currentEl.parentElement;
       }
-      
+
       if (activeWinKey) {
         setActiveWindow(activeWinKey);
       }
@@ -463,7 +485,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
       if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
         element.focus();
       }
-      
+
       // Dispatch a standard click on the element
       element.click();
     }
@@ -473,7 +495,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
       // Clicking on taskbar icons!
       const width = rect.width;
       const center = width / 2;
-      
+
       // taskbar icons are centered in Win11
       const clickOffsetFromCenter = x - center;
       if (Math.abs(clickOffsetFromCenter) < 140) {
@@ -549,18 +571,18 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
   }, []);
 
   // Generate self QR Code & instructions based on custom local IP or window location
-  const baseAppUrl = customIp 
-    ? `http://${customIp}${customPort ? ':' + customPort : ''}` 
+  const baseAppUrl = customIp
+    ? `http://${customIp}${customPort ? ':' + customPort : ''}`
     : (window.location.origin + window.location.pathname);
   const appUrl = baseAppUrl.includes('?') ? `${baseAppUrl}&mode=phone` : `${baseAppUrl}?mode=phone`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(appUrl)}`;
 
   return (
     <div className="flex-1 flex flex-col gap-6 w-full max-w-4xl">
-      
+
       {/* PC Simulator Stage Frame */}
       <div className="flex flex-col bg-[#0F1117] border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
-        
+
         {/* Frame Top Header Bar (Desktop monitor look) */}
         <div className="h-10 bg-[#0A0C10] px-4 flex items-center justify-between border-b border-white/5 select-none">
           <div className="flex items-center gap-2">
@@ -578,7 +600,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
         </div>
 
         {/* Windows Desktop Container */}
-        <div 
+        <div
           ref={desktopRef}
           id="win-desktop"
           className="relative w-full aspect-video bg-gradient-to-tr from-[#0A0C10] via-[#0E1B30] to-[#0F1117] text-white overflow-hidden p-4 select-none"
@@ -597,12 +619,12 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               </motion.div>
             )}
           </AnimatePresence>
-          
+
           {/* Real-time moving Windows cursor */}
-          <div 
+          <div
             className="absolute pointer-events-none transition-all duration-75 ease-out z-[9999]"
-            style={{ 
-              left: cursorPos.x, 
+            style={{
+              left: cursorPos.x,
               top: cursorPos.y,
             }}
           >
@@ -621,129 +643,126 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* WINDOW 1: SERVER CONSOLE & CONFIG (Always useful) */}
             <AnimatePresence>
               {!minimizedWindows.console && (
-                <motion.div 
+                <motion.div
                   data-window-id="console"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className={`absolute top-4 left-4 w-[360px] h-[340px] bg-[#161922]/95 border border-white/5 rounded-xl shadow-xl flex flex-col overflow-hidden ${activeWindow === 'console' ? 'ring-2 ring-blue-500/50' : ''}`}
+                  className={`absolute top-4 left-4 w-[360px] h-[395px] bg-[#161922]/95 border border-white/5 rounded-xl shadow-xl flex flex-col overflow-hidden ${activeWindow === 'console' ? 'ring-2 ring-blue-500/50' : ''}`}
                   onClick={() => setActiveWindow('console')}
                 >
                   <div className="h-8 bg-[#0F1117] px-3 flex justify-between items-center border-b border-white/5 text-[10px] font-bold text-slate-300">
                     <span className="flex items-center gap-1.5"><Radio className="w-3.5 h-3.5 text-blue-400" /> 配对与状态控制台</span>
                     <button onClick={() => toggleMinimize('console')} className="text-slate-500 hover:text-white transition-colors cursor-pointer">✕</button>
                   </div>
-                  <div className="flex-1 p-3.5 flex flex-col justify-between text-xs overflow-y-auto bg-[#0A0C10]/95">
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="px-2.5 py-1 bg-blue-500/15 border border-blue-500/30 text-blue-400 rounded-lg text-lg font-black tracking-widest font-mono">
-                          {pin}
-                        </div>
-                        <div className="text-[10px] text-slate-400 leading-normal">
-                          <b className="text-slate-200">配对码 PIN</b><br/>
-                          输入配对码完成两端绑定
-                        </div>
+                  <div className="flex-1 p-2.5 flex flex-col gap-2 text-xs overflow-y-auto bg-[#0A0C10]/95">
+                    <div className="flex items-center gap-2">
+                      <div className="px-2.5 py-1 bg-blue-500/15 border border-blue-500/30 text-blue-400 rounded-lg text-lg font-black tracking-widest font-mono shrink-0">
+                        {pin}
                       </div>
-
-                      {/* Client Connection Stats */}
-                      <div className="grid grid-cols-2 gap-2 bg-[#0A0C10]/60 p-2 border border-white/5 rounded-lg mb-2">
-                        <div>
-                          <span className="text-[9px] text-slate-500 block">手机状态</span>
-                          <span className={`text-[11px] font-bold ${peerConnected ? 'text-blue-400' : 'text-slate-400'}`}>
-                            {peerConnected ? '● 已配对 (1)' : '▲ 等待手机连接'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[9px] text-slate-500 block">服务器响应</span>
-                          <span className="text-[11px] font-bold text-slate-300">
-                            {latencyHistory[latencyHistory.length - 1].toFixed(1)} ms
-                          </span>
-                        </div>
-                        <div className="col-span-2 border-t border-white/5 pt-1 flex justify-between text-[9px] text-slate-500">
-                          <span>包数量: {packetCount}</span>
-                          <span>缓存: {receivedBytes} B</span>
-                        </div>
-                      </div>
-
-                      {/* LAN IP Configurator */}
-                      <div className="bg-[#0A0C10]/60 p-2 border border-white/5 rounded-lg mb-3 flex flex-col gap-1">
-                        <div className="flex justify-between items-center text-[9px] text-slate-400">
-                          <span>局域网访问地址:</span>
-                          <button 
-                            onClick={() => setIsEditingIp(!isEditingIp)}
-                            className="text-blue-400 hover:underline hover:text-blue-300 font-medium transition-colors"
-                          >
-                            {isEditingIp ? '确定' : '手动输入'}
-                          </button>
-                        </div>
-                        {isEditingIp ? (
-                          <div className="flex gap-1 mt-1">
-                            <input 
-                              type="text"
-                              value={customIp}
-                              onChange={(e) => setCustomIp(e.target.value)}
-                              placeholder="请输入您的电脑 IP (如 192.168.1.5)"
-                              className="flex-1 bg-[#161922] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white outline-none focus:border-blue-500/50 font-mono"
-                            />
-                            <input 
-                              type="text"
-                              value={customPort}
-                              onChange={(e) => setCustomPort(e.target.value)}
-                              placeholder="端口"
-                              className="w-12 bg-[#161922] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white text-center outline-none focus:border-blue-500/50 font-mono"
-                            />
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-blue-400 font-bold font-mono select-text truncate">
-                            {appUrl}
-                          </div>
-                        )}
-
-                        {/* Quick-select detected IPs */}
-                        {detectedIps.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1 items-center">
-                            <span className="text-[8px] text-slate-500 mr-1">可用 IP:</span>
-                            {detectedIps.map((ip) => (
-                              <button
-                                key={ip}
-                                onClick={() => {
-                                  setCustomIp(ip);
-                                  playClickSound('click');
-                                }}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all border ${
-                                  customIp === ip
-                                    ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                                    : 'bg-[#161922] text-slate-400 hover:text-slate-200 border-white/5'
-                                }`}
-                              >
-                                {ip}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        <span className="text-[8px] text-slate-500 leading-normal mt-0.5">
-                          {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-                            ? '已为您自动检测并选择电脑的局域网 IP，手机扫码即可直接访问（需在同一 WiFi 下）。'
-                            : '若您在本地测试本程序，可在这里填入或选择您电脑的局域网 IP 以修正扫码地址。'}
-                        </span>
-                      </div>
-
-                      {/* QR Code Section */}
-                      <div className="flex gap-2.5 items-center bg-[#161922] p-2.5 rounded-lg border border-white/5">
-                        <img 
-                          src={qrCodeUrl} 
-                          alt="Mobile QR Code" 
-                          className="w-16 h-16 object-contain pointer-events-none select-none bg-white p-1 rounded"
-                        />
-                        <div className="flex-1 text-[9px] text-slate-400 font-sans leading-relaxed">
-                          <b className="text-white text-[10px]">扫描二维码控制</b><br/>
-                          使用手机浏览器扫码，直接作为无线物理触控板，支持真正的多指滑动！
-                        </div>
+                      <div className="text-[10px] text-slate-400 leading-normal">
+                        <b className="text-slate-200">配对码 PIN</b><br />
+                        输入配对码完成两端绑定
                       </div>
                     </div>
 
-                    <div className="text-[9px] text-slate-500 mt-2 text-center">
+                    {/* Client Connection Stats */}
+                    <div className="grid grid-cols-2 gap-2 bg-[#0A0C10]/60 p-2 border border-white/5 rounded-lg">
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">手机状态</span>
+                        <span className={`text-[11px] font-bold ${peerConnected ? 'text-blue-400' : 'text-slate-400'}`}>
+                          {peerConnected ? '● 已配对 (1)' : '▲ 等待手机连接'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">服务器响应</span>
+                        <span className="text-[11px] font-bold text-slate-300">
+                          {latencyHistory[latencyHistory.length - 1].toFixed(1)} ms
+                        </span>
+                      </div>
+                      <div className="col-span-2 border-t border-white/5 pt-1 flex justify-between text-[9px] text-slate-500">
+                        <span>包数量: {packetCount}</span>
+                        <span>缓存: {receivedBytes} B</span>
+                      </div>
+                    </div>
+
+                    {/* LAN IP Configurator */}
+                    <div className="bg-[#0A0C10]/60 p-2 border border-white/5 rounded-lg flex flex-col gap-1">
+                      <div className="flex justify-between items-center text-[9px] text-slate-400">
+                        <span>局域网访问地址:</span>
+                        <button
+                          onClick={() => setIsEditingIp(!isEditingIp)}
+                          className="text-blue-400 hover:underline hover:text-blue-300 font-medium transition-colors"
+                        >
+                          {isEditingIp ? '确定' : '手动输入'}
+                        </button>
+                      </div>
+                      {isEditingIp ? (
+                        <div className="flex gap-1 mt-1">
+                          <input
+                            type="text"
+                            value={customIp}
+                            onChange={(e) => setCustomIp(e.target.value)}
+                            placeholder="请输入您的电脑 IP (如 192.168.1.5)"
+                            className="flex-1 bg-[#161922] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white outline-none focus:border-blue-500/50 font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={customPort}
+                            onChange={(e) => setCustomPort(e.target.value)}
+                            placeholder="端口"
+                            className="w-12 bg-[#161922] border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white text-center outline-none focus:border-blue-500/50 font-mono"
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-blue-400 font-bold font-mono select-text truncate">
+                          {appUrl}
+                        </div>
+                      )}
+
+                      {/* Quick-select detected IPs */}
+                      {detectedIps.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1 items-center">
+                          <span className="text-[8px] text-slate-500 mr-1">可用 IP:</span>
+                          {detectedIps.map((ip) => (
+                            <button
+                              key={ip}
+                              onClick={() => {
+                                setCustomIp(ip);
+                                playClickSound('click');
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all border ${customIp === ip
+                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                                : 'bg-[#161922] text-slate-400 hover:text-slate-200 border-white/5'
+                                }`}
+                            >
+                              {ip}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <span className="text-[8px] text-slate-500 leading-normal mt-0.5">
+                        {window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                          ? '已为您自动检测局域网 IP，请保持同一 WiFi。'
+                          : '若在本地测试，请输入您电脑的局域网 IP 以修正扫码地址。'}
+                      </span>
+                    </div>
+
+                    {/* QR Code Section */}
+                    <div className="flex gap-3 items-center bg-[#161922] p-2 rounded-lg border border-white/5">
+                      <img
+                        src={qrCodeUrl}
+                        alt="Mobile QR Code"
+                        className="w-24 h-24 object-contain pointer-events-none select-none bg-white p-1 rounded shrink-0"
+                      />
+                      <div className="flex-1 text-[9px] text-slate-400 font-sans leading-relaxed">
+                        <b className="text-white text-[10px]">扫描二维码控制</b><br />
+                        使用手机浏览器扫码，直接作为无线物理触控板，支持真正的多指滑动！
+                      </div>
+                    </div>
+
+                    <div className="text-[9px] text-slate-500 mt-1 text-center">
                       点击底部栏图标，随时展开或隐藏不同的应用窗口。
                     </div>
                   </div>
@@ -754,7 +773,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* WINDOW 2: PAINT BOARD (电子画板) */}
             <AnimatePresence>
               {!minimizedWindows.paint && (
-                <motion.div 
+                <motion.div
                   data-window-id="paint"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -766,50 +785,50 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
                     <span className="flex items-center gap-1.5"><Palette className="w-3.5 h-3.5 text-blue-400" /> 电子手写画板</span>
                     <button onClick={() => toggleMinimize('paint')} className="text-slate-500 hover:text-white transition-colors cursor-pointer">✕</button>
                   </div>
-                  
+
                   {/* Drawing Area */}
                   <div className="flex-1 relative bg-[#0A0C10]">
-                    <canvas 
+                    <canvas
                       ref={canvasRef}
                       width={360}
                       height={240}
                       className="w-full h-full bg-[#0A0C10] cursor-crosshair"
                     />
-                    
+
                     {/* Floating tools bar */}
                     <div className="absolute bottom-2 left-2 right-2 h-9 bg-[#0F1117]/90 border border-white/5 rounded-lg p-1 px-2 flex justify-between items-center text-xs gap-2">
                       <div className="flex items-center gap-1.5">
-                        <button 
-                          onClick={() => setBrushColor('#10b981')} 
+                        <button
+                          onClick={() => setBrushColor('#10b981')}
                           className={`w-4.5 h-4.5 rounded-full bg-emerald-500 border ${brushColor === '#10b981' ? 'border-white scale-110' : 'border-transparent'}`}
                           title="绿"
                         />
-                        <button 
-                          onClick={() => setBrushColor('#3b82f6')} 
+                        <button
+                          onClick={() => setBrushColor('#3b82f6')}
                           className={`w-4.5 h-4.5 rounded-full bg-blue-500 border ${brushColor === '#3b82f6' ? 'border-white scale-110' : 'border-transparent'}`}
                           title="蓝"
                         />
-                        <button 
-                          onClick={() => setBrushColor('#ef4444')} 
+                        <button
+                          onClick={() => setBrushColor('#ef4444')}
                           className={`w-4.5 h-4.5 rounded-full bg-red-500 border ${brushColor === '#ef4444' ? 'border-white scale-110' : 'border-transparent'}`}
                           title="红"
                         />
-                        <button 
-                          onClick={() => setBrushColor('#eab308')} 
+                        <button
+                          onClick={() => setBrushColor('#eab308')}
                           className={`w-4.5 h-4.5 rounded-full bg-yellow-500 border ${brushColor === '#eab308' ? 'border-white scale-110' : 'border-transparent'}`}
                           title="黄"
                         />
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <button 
+                        <button
                           onClick={() => setAutoDraw(!autoDraw)}
                           className={`px-1.5 py-0.5 rounded text-[9px] border transition-all ${autoDraw ? 'bg-blue-500/20 text-blue-400 border-blue-500/40' : 'bg-slate-950 text-slate-400 border-slate-800'}`}
                           title="开启后无需点击左键即可滑动绘画"
                         >
                           悬停绘图
                         </button>
-                        <button 
+                        <button
                           onClick={clearPaintBoard}
                           className="p-1 rounded bg-[#161922] border border-white/5 text-slate-300 hover:text-red-400 transition-colors"
                           title="清除画板"
@@ -826,7 +845,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* WINDOW 3: NOTEPAD (记事本 - standard typing test) */}
             <AnimatePresence>
               {!minimizedWindows.notepad && (
-                <motion.div 
+                <motion.div
                   data-window-id="notepad"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -839,7 +858,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
                     <button onClick={() => toggleMinimize('notepad')} className="text-slate-500 hover:text-white transition-colors cursor-pointer">✕</button>
                   </div>
                   <div className="flex-1 p-2 bg-[#0A0C10] relative">
-                    <textarea 
+                    <textarea
                       id="win-notepad-textarea"
                       value={notepadText}
                       onChange={(e) => setNotepadText(e.target.value)}
@@ -857,7 +876,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* WINDOW 4: PACKET TERMINAL LOGS (按键包监视器) */}
             <AnimatePresence>
               {!minimizedWindows.terminal && (
-                <motion.div 
+                <motion.div
                   data-window-id="terminal"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -891,7 +910,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* WINDOW 5: HELP & SYSTEM INTRO (帮助与系统介绍) */}
             <AnimatePresence>
               {!minimizedWindows.help && (
-                <motion.div 
+                <motion.div
                   data-window-id="help"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -944,7 +963,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
 
           {/* Windows 11 Centered Taskbar */}
           <div className="absolute bottom-0 left-0 right-0 h-11 bg-[#0F1117]/90 border-t border-white/5 px-4 flex justify-between items-center z-50 select-none">
-            
+
             {/* Start icon / Left widgets */}
             <div className="flex items-center gap-3">
               <span className="text-[10px] font-bold text-slate-500 font-mono tracking-widest bg-[#161922] px-2 py-0.5 rounded border border-white/5">
@@ -955,7 +974,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
             {/* Centered Taskbar App Launcher Icons */}
             <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#161922]/60 p-1 px-2.5 border border-white/5 rounded-full shadow-lg">
               {/* Home/Console Icon */}
-              <button 
+              <button
                 onClick={() => toggleMinimize('console')}
                 className={`p-1.5 rounded-full transition-all active:scale-90 relative ${!minimizedWindows.console ? 'bg-blue-500/10 text-blue-400 scale-105' : 'text-slate-400 hover:bg-slate-800'}`}
                 title="配对与状态控制台"
@@ -965,7 +984,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               </button>
 
               {/* Paint Icon */}
-              <button 
+              <button
                 onClick={() => toggleMinimize('paint')}
                 className={`p-1.5 rounded-full transition-all active:scale-90 relative ${!minimizedWindows.paint ? 'bg-blue-500/10 text-blue-400 scale-105' : 'text-slate-400 hover:bg-slate-800'}`}
                 title="电子画板"
@@ -975,7 +994,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               </button>
 
               {/* Notepad Icon */}
-              <button 
+              <button
                 onClick={() => toggleMinimize('notepad')}
                 className={`p-1.5 rounded-full transition-all active:scale-90 relative ${!minimizedWindows.notepad ? 'bg-blue-500/10 text-blue-400 scale-105' : 'text-slate-400 hover:bg-slate-800'}`}
                 title="记事本"
@@ -985,7 +1004,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               </button>
 
               {/* Terminal Icon */}
-              <button 
+              <button
                 onClick={() => toggleMinimize('terminal')}
                 className={`p-1.5 rounded-full transition-all active:scale-90 relative ${!minimizedWindows.terminal ? 'bg-blue-500/10 text-blue-400 scale-105' : 'text-slate-400 hover:bg-slate-800'}`}
                 title="网络包终端"
@@ -995,7 +1014,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               </button>
 
               {/* Help & Intro Icon */}
-              <button 
+              <button
                 onClick={() => toggleMinimize('help')}
                 className={`p-1.5 rounded-full transition-all active:scale-90 relative ${!minimizedWindows.help ? 'bg-blue-500/10 text-blue-400 scale-105' : 'text-slate-400 hover:bg-slate-800'}`}
                 title="系统使用帮助"
@@ -1030,8 +1049,8 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               您可以在真实电脑中，用下面的 Python 脚本建立物理连接，控制实际的操作系统光标。
             </p>
           </div>
-          
-          <button 
+
+          <button
             onClick={copyScriptToClipboard}
             className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer active:scale-[0.98] ${copied ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-[#161922] hover:bg-slate-800 text-slate-200 border border-white/5'}`}
           >
@@ -1058,7 +1077,7 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
               pip install pyautogui websockets asyncio
             </pre>
           </div>
-          
+
           <div className="p-4 bg-[#0A0C10] border border-white/5 rounded-xl leading-relaxed">
             <span className="text-blue-400 font-mono block mb-1">步骤 2: 保存并运行</span>
             将复制的脚本保存为 <code className="text-slate-300 font-bold font-mono">receiver.py</code>，然后输入电脑对应的 PIN 运行它：

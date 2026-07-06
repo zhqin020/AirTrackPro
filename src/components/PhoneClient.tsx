@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Settings as SettingsIcon, 
-  Keyboard as KeyboardIcon, 
-  Grid3X3, 
-  Wifi, 
-  Battery, 
-  Sparkles, 
-  Check, 
-  AlertCircle, 
-  Play, 
+import {
+  Settings as SettingsIcon,
+  Keyboard as KeyboardIcon,
+  Grid3X3,
+  Wifi,
+  Battery,
+  Sparkles,
+  Check,
+  AlertCircle,
+  Play,
   RotateCcw,
   Volume2,
   Volume1,
@@ -104,11 +104,20 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
   // Touch tracking state
   const [touchFeedback, setTouchFeedback] = useState<TouchPoint | null>(null);
+  const [isDraggingActive, setIsDraggingActive] = useState<boolean>(false);
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const touchpadRef = useRef<HTMLDivElement | null>(null);
   const lastTouchPosRef = useRef<{ x: number; y: number } | null>(null);
   const isScrollingRef = useRef<boolean>(false);
   const lastScrollYRef = useRef<number | null>(null);
+  const lastScrollXRef = useRef<number | null>(null);
+
+  // Custom gesture tracking refs
+  const lastTapTimeRef = useRef<number>(0);
+  const lastTapPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingGestureRef = useRef<boolean>(false);
+  const twoFingerStartRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  const ignoreNextPointerClickRef = useRef<boolean>(false);
 
   // Load settings from localStorage
   useEffect(() => {
@@ -160,7 +169,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
+
           if (data.type === 'joined') {
             setStatus('connected');
             setClientCount(data.clientCount);
@@ -312,21 +321,143 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
     setNativeInputValue('');
   };
 
+  // Handle multi-touch (two-finger scroll)
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      isScrollingRef.current = true;
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const avgY = (t1.clientY + t2.clientY) / 2;
+      const avgX = (t1.clientX + t2.clientX) / 2;
+      lastScrollYRef.current = avgY;
+      lastScrollXRef.current = avgX;
+
+      twoFingerStartRef.current = {
+        time: Date.now(),
+        x: avgX,
+        y: avgY
+      };
+
+      // Prevent browser default gesture (e.g. pinch to zoom or scroll)
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    } else {
+      isScrollingRef.current = false;
+      lastScrollYRef.current = null;
+      lastScrollXRef.current = null;
+      twoFingerStartRef.current = null;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (isScrollingRef.current || e.touches.length === 2) {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const currentY = (t1.clientY + t2.clientY) / 2;
+        const currentX = (t1.clientX + t2.clientX) / 2;
+
+        if (twoFingerStartRef.current) {
+          const dist = Math.hypot(
+            currentX - twoFingerStartRef.current.x,
+            currentY - twoFingerStartRef.current.y
+          );
+          // If they scroll/move more than 12 pixels, cancel the two-finger tap detection
+          if (dist > 12) {
+            twoFingerStartRef.current = null;
+          }
+        }
+
+        if (lastScrollYRef.current !== null && lastScrollXRef.current !== null) {
+          const dy = currentY - lastScrollYRef.current;
+          const scrollSpeedMultiplier = settings.scrollingSpeed * 0.4;
+          const scrollDy = settings.naturalScrolling ? dy : -dy;
+
+          // Only send scroll if there's notable movement
+          if (Math.abs(scrollDy) > 0.5) {
+            sendControlPacket({
+              type: 'mouse-scroll',
+              dy: scrollDy * scrollSpeedMultiplier
+            });
+          }
+        }
+
+        lastScrollYRef.current = currentY;
+        lastScrollXRef.current = currentX;
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (twoFingerStartRef.current) {
+      const elapsed = Date.now() - twoFingerStartRef.current.time;
+      if (elapsed < 280) {
+        // Two-finger tap detected! Trigger right click!
+        triggerMouseClick(settings.leftHandMode ? 'left' : 'right');
+        // Ignore the next pointer release click so we don't also fire a left-click
+        ignoreNextPointerClickRef.current = true;
+        setTimeout(() => {
+          ignoreNextPointerClickRef.current = false;
+        }, 300);
+      }
+      twoFingerStartRef.current = null;
+    }
+
+    if (isScrollingRef.current) {
+      isScrollingRef.current = false;
+      lastScrollYRef.current = null;
+      lastScrollXRef.current = null;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    }
+  };
+
   // Handle Touchpad Interaction (mouse drag emulation)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = touchpadRef.current?.getBoundingClientRect();
     if (!rect) return;
-    
+
     // Set pointer capture to handle movement outside touchpad
     touchpadRef.current?.setPointerCapture(e.pointerId);
 
     const clientX = e.clientX;
     const clientY = e.clientY;
-    
+
+    // Check for double-tap to drag
+    const now = Date.now();
+    const timeDiff = now - lastTapTimeRef.current;
+    let isDoubleTap = false;
+
+    if (timeDiff < 300 && lastTapPosRef.current) {
+      const dist = Math.hypot(
+        clientX - lastTapPosRef.current.x,
+        clientY - lastTapPosRef.current.y
+      );
+      if (dist < 45) {
+        isDoubleTap = true;
+      }
+    }
+
+    if (isDoubleTap) {
+      isDraggingGestureRef.current = true;
+      setIsDraggingActive(true);
+      // Immediately press left mouse button down for dragging
+      triggerMouseDown(settings.leftHandMode ? 'right' : 'left');
+    } else {
+      isDraggingGestureRef.current = false;
+      setIsDraggingActive(false);
+    }
+
     touchStartRef.current = {
       x: clientX,
       y: clientY,
-      time: Date.now()
+      time: now
     };
     lastTouchPosRef.current = { x: clientX, y: clientY };
     isScrollingRef.current = false;
@@ -343,7 +474,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!lastTouchPosRef.current) return;
-    
+
     const rect = touchpadRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -365,11 +496,11 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
     // Check for standard multi-touch or scroll mode simulation via shift/ctrl or simply standard swipe
     // If we are in Web, dragging with secondary button or holding certain modifier keys can trigger scroll.
     // Let's implement dragging to move cursor as primary.
-    if (e.buttons === 2 || e.shiftKey) {
+    if (!isDraggingGestureRef.current && (e.buttons === 2 || e.shiftKey)) {
       // Scroll mode
       const scrollSpeedMultiplier = settings.scrollingSpeed * 0.4;
       const scrollDy = settings.naturalScrolling ? dy : -dy;
-      
+
       if (Math.abs(scrollDy) > 0.5) {
         sendControlPacket({
           type: 'mouse-scroll',
@@ -377,13 +508,13 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
         });
       }
     } else {
-      // Normal cursor movement
+      // Normal cursor movement or dragging movement
       const trackingMultiplier = settings.trackingSpeed * 0.3;
       if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
         sendControlPacket({
           type: 'mouse-move',
-          dx,
-          dy,
+          dx: dx * trackingMultiplier,
+          dy: dy * trackingMultiplier,
           sensitivity: trackingMultiplier
         });
       }
@@ -396,17 +527,31 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
     touchpadRef.current?.releasePointerCapture(e.pointerId);
     setTouchFeedback(null);
 
-    if (touchStartRef.current) {
-      const duration = Date.now() - touchStartRef.current.time;
-      const dist = Math.hypot(
-        e.clientX - touchStartRef.current.x,
-        e.clientY - touchStartRef.current.y
-      );
+    if (isDraggingGestureRef.current) {
+      // Drag gesture ends, release left button
+      triggerMouseUp(settings.leftHandMode ? 'right' : 'left');
+      isDraggingGestureRef.current = false;
+      setIsDraggingActive(false);
+      lastTapTimeRef.current = 0;
+      lastTapPosRef.current = null;
+    } else {
+      if (touchStartRef.current) {
+        const duration = Date.now() - touchStartRef.current.time;
+        const dist = Math.hypot(
+          e.clientX - touchStartRef.current.x,
+          e.clientY - touchStartRef.current.y
+        );
 
-      // Tap threshold: less than 10 pixels and under 250ms
-      if (dist < 10 && duration < 250) {
-        // Trigger left click
-        triggerMouseClick(settings.leftHandMode ? 'right' : 'left');
+        // Tap threshold: less than 12 pixels and under 250ms
+        if (dist < 12 && duration < 250) {
+          if (!ignoreNextPointerClickRef.current) {
+            // Trigger left click
+            triggerMouseClick(settings.leftHandMode ? 'right' : 'left');
+            // Save tap info for potential double-tap drag on subsequent tap
+            lastTapTimeRef.current = Date.now();
+            lastTapPosRef.current = { x: e.clientX, y: e.clientY };
+          }
+        }
       }
     }
 
@@ -419,7 +564,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
     if (settings.keyClickSound) {
       playClickSound('click');
     }
-    
+
     // Send click down and click up in sequence
     sendControlPacket({
       type: 'mouse-click',
@@ -515,8 +660,8 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
   }, []);
 
   return (
-    <div 
-      id={(isFullscreen || isMobileSize) ? "fullscreen-smartphone" : "simulated-smartphone"} 
+    <div
+      id={(isFullscreen || isMobileSize) ? "fullscreen-smartphone" : "simulated-smartphone"}
       className={
         (isFullscreen || isMobileSize)
           ? "relative w-full bg-neutral-950 flex flex-col overflow-hidden select-none"
@@ -528,7 +673,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
           : undefined
       }
     >
-      
+
       {/* Speaker and Camera notch (Only for desktop mockup, hidden on real fullscreen phone) */}
       {!isFullscreen && !isMobileSize && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-6 bg-neutral-950 rounded-b-2xl z-50 flex justify-center items-center gap-2 border-b border-x border-neutral-800/40">
@@ -538,14 +683,14 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
       )}
 
       {/* Screen container */}
-      <div 
+      <div
         className={
           (isFullscreen || isMobileSize)
             ? "relative flex-1 bg-neutral-900 overflow-hidden flex flex-col"
             : "relative flex-1 bg-neutral-900 rounded-[34px] overflow-hidden flex flex-col border border-neutral-800"
         }
       >
-        
+
         {/* Dynamic content area depending on connection */}
         {status !== 'connected' ? (
           /* Connecting Screen */
@@ -553,7 +698,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
             <div className="w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shadow-lg shadow-blue-500/20 mb-5">
               <Sparkles className="w-8 h-8 text-blue-400 animate-pulse" />
             </div>
-            
+
             <h2 className="text-xl font-bold text-white tracking-tight font-sans">AirTrack Pro</h2>
             <p className="text-xs text-slate-400 mt-2 max-w-[240px] leading-relaxed">
               请输入接收端电脑屏幕上显示的 4 位连接配对码
@@ -562,8 +707,8 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
             <div className="w-full mt-8 max-w-[220px]">
               <label className="block text-[10px] font-semibold text-slate-500 tracking-wider text-left uppercase mb-1">配对 PIN 码</label>
               <div className="relative">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   maxLength={4}
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
@@ -573,7 +718,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
               </div>
             </div>
 
-            <button 
+            <button
               onClick={connect}
               disabled={status === 'connecting'}
               className="w-full max-w-[220px] h-11 mt-6 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20 cursor-pointer active:scale-[0.98]"
@@ -601,14 +746,14 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
         ) : (
           /* Active Remote Control Screen */
           <div className="flex-1 flex flex-col bg-neutral-950">
-            
+
             {/* Top controller header status bar */}
             <div className="h-8 bg-neutral-900 border-b border-white/5 px-4 flex justify-between items-center text-[10px] text-slate-400">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
                 <span>已连接电脑 (PIN: {pin})</span>
               </div>
-              <button 
+              <button
                 onClick={disconnect}
                 className="text-slate-500 hover:text-red-400 transition-colors font-medium cursor-pointer"
               >
@@ -618,7 +763,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
             {/* Touchpad Area (Sleek Royal Blue Theme) */}
             <div className="relative flex-1 min-h-[120px] bg-gradient-to-br from-[#161922] to-[#0D1017] p-4 flex flex-col justify-between overflow-hidden">
-              
+
               {/* Background watermark label */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none opacity-[0.03]">
                 <span className="text-4xl font-extrabold tracking-widest text-blue-400">TOUCHPAD</span>
@@ -635,21 +780,38 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
               </div>
 
               {/* Real tactile touchpad interaction stage */}
-              <div 
+              <div
                 ref={touchpadRef}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
                 onDoubleClick={handleTouchpadDoubleClick}
                 className="absolute inset-0 z-20 cursor-crosshair touch-none"
-                title="用鼠标拖拽或手机手指滑动控制光标。单触=左击，双击=右击"
+                title="单指轻触=左击，双指轻触=右击，双击并拖拽=拖拽"
               />
 
               {/* Centered typed text or scroll info indicator */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-10">
-                {activeTab === 'numpad' ? (
-                  <motion.span 
+                {isDraggingActive ? (
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 0.8 }}
+                    className="flex flex-col items-center gap-1 px-4 py-2 bg-blue-500/10 border border-blue-500/25 rounded-xl backdrop-blur-sm"
+                  >
+                    <span className="text-xs font-bold text-blue-400 tracking-wider animate-pulse flex items-center gap-1.5">
+                      ✊ 正在拖拽 / 选择中...
+                    </span>
+                    <span className="text-[9px] text-blue-400/60 font-mono">
+                      滑动控制，松开单指即释放
+                    </span>
+                  </motion.div>
+                ) : activeTab === 'numpad' ? (
+                  <motion.span
                     initial={{ scale: 0.9, opacity: 0 }}
                     animate={{ scale: 1, opacity: 0.15 }}
                     className="text-4xl font-mono text-white tracking-widest font-extrabold"
@@ -657,15 +819,16 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                     1111
                   </motion.span>
                 ) : (
-                  <span className="text-[10px] text-blue-400/40 text-center max-w-[200px] leading-relaxed">
-                    在蓝色区域滑动控制鼠标<br/>双指/Shift+拖动滚动
+                  <span className="text-[10px] text-blue-400/40 text-center max-w-[240px] leading-relaxed">
+                    单指滑动控制光标 | 双指轻触右击<br />
+                    双指滑动滚动 | 双击并滑动拖拽
                   </span>
                 )}
               </div>
 
               {/* Interactive Visual Ripple Touch Feedback */}
               {settings.showTouchFeedback && touchFeedback && (
-                <div 
+                <div
                   className="absolute w-12 h-12 border-2 border-blue-400/80 bg-blue-500/20 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30 flex items-center justify-center"
                   style={{ left: touchFeedback.x, top: touchFeedback.y }}
                 >
@@ -679,7 +842,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
               {/* Mouse Buttons (Optional) - Hidden when native keyboard is active to free up touchscreen height */}
               {settings.showMouseButtons && !isInputFocused && (
                 <div className="w-full flex gap-1.5 h-11">
-                  <button 
+                  <button
                     onPointerDown={() => triggerMouseDown(settings.leftHandMode ? 'right' : 'left')}
                     onPointerUp={() => triggerMouseUp(settings.leftHandMode ? 'right' : 'left')}
                     onPointerLeave={() => triggerMouseUp(settings.leftHandMode ? 'right' : 'left')}
@@ -687,7 +850,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                   >
                     {settings.leftHandMode ? '右键 (R)' : '左键 (L)'}
                   </button>
-                  <button 
+                  <button
                     onPointerDown={() => triggerMouseDown('middle')}
                     onPointerUp={() => triggerMouseUp('middle')}
                     onPointerLeave={() => triggerMouseUp('middle')}
@@ -696,7 +859,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                   >
                     M
                   </button>
-                  <button 
+                  <button
                     onPointerDown={() => triggerMouseDown(settings.leftHandMode ? 'left' : 'right')}
                     onPointerUp={() => triggerMouseUp(settings.leftHandMode ? 'left' : 'right')}
                     onPointerLeave={() => triggerMouseUp(settings.leftHandMode ? 'left' : 'right')}
@@ -710,7 +873,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
               {/* Keyboard selection buttons (No text, compact, horizontal layout) */}
               <div className="w-full flex gap-1.5 h-9 bg-neutral-900/80 p-0.5 rounded-lg border border-white/5">
                 {/* Control Tab */}
-                <button 
+                <button
                   onClick={() => {
                     setActiveTab(activeTab === 'control' ? 'touchpad' : 'control');
                     if (settings.keyClickSound) playClickSound('toggle');
@@ -722,11 +885,12 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 </button>
 
                 {/* Standard Keyboard (System native) */}
-                <button 
+                <button
                   onClick={() => {
                     if (activeTab === 'keyboard') {
-                      // Already on keyboard, force focus again to trigger OS soft keyboard show
-                      nativeInputRef.current?.focus();
+                      setActiveTab('touchpad');
+                      nativeInputRef.current?.blur();
+                      if (settings.keyClickSound) playClickSound('toggle');
                     } else {
                       setActiveTab('keyboard');
                       if (settings.keyClickSound) playClickSound('toggle');
@@ -740,7 +904,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 </button>
 
                 {/* Extended Keyboard */}
-                <button 
+                <button
                   onClick={() => {
                     setActiveTab(activeTab === 'numpad' ? 'touchpad' : 'numpad');
                     if (settings.keyClickSound) playClickSound('toggle');
@@ -752,7 +916,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 </button>
 
                 {/* Settings */}
-                <button 
+                <button
                   onClick={() => {
                     setActiveTab(activeTab === 'settings' ? 'touchpad' : 'settings');
                     if (settings.keyClickSound) playClickSound('toggle');
@@ -781,16 +945,15 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
             />
 
             {/* Dynamic Panel Area (Standard keyboard, numpad/functional, control, or settings) */}
-            <div 
-              className={`bg-[#111111] relative border-neutral-800/50 flex flex-col transition-all duration-300 ease-out ${
-                (activeTab === 'numpad' || activeTab === 'settings' || activeTab === 'control' || (activeTab === 'keyboard' && isInputFocused)) 
-                  ? `${(activeTab === 'keyboard' && (isFullscreen || isMobileSize)) ? 'h-0 overflow-hidden' : 'h-[280px] border-t'}` 
+            <div
+              className={`bg-[#111111] relative border-neutral-800/50 flex flex-col transition-all duration-300 ease-out ${(activeTab === 'numpad' || activeTab === 'settings' || activeTab === 'control' || (activeTab === 'keyboard' && isInputFocused))
+                  ? 'h-[280px] border-t'
                   : 'h-0 border-t-0 overflow-hidden'
-              }`}
+                }`}
             >
               <AnimatePresence mode="wait">
                 {activeTab === 'touchpad' && (
-                  <motion.div 
+                  <motion.div
                     key="intro"
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -806,7 +969,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 )}
 
                 {activeTab === 'control' && (
-                  <motion.div 
+                  <motion.div
                     key="control"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -814,60 +977,56 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                     className="flex-1 p-3 flex flex-col justify-between select-none text-xs text-neutral-200 h-full overflow-y-auto"
                   >
                     <div className="flex flex-col gap-2.5 h-full">
-                      
+
                       {/* Section 1: Modifier Keys (Toggles) */}
                       <div>
                         <div className="text-[10px] text-neutral-500 font-bold tracking-wider uppercase mb-1">修饰键锁定 (点击以启用组合键)</div>
                         <div className="grid grid-cols-4 gap-1.5">
-                          <button 
+                          <button
                             onClick={() => {
                               setActiveModifiers(prev => ({ ...prev, ctrl: !prev.ctrl }));
                               if (settings.keyClickSound) playClickSound('key');
                             }}
-                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${
-                              activeModifiers.ctrl 
-                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20' 
+                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${activeModifiers.ctrl
+                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20'
                                 : 'bg-[#1e1e1e] border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                            }`}
+                              }`}
                           >
                             Ctrl
                           </button>
-                          <button 
+                          <button
                             onClick={() => {
                               setActiveModifiers(prev => ({ ...prev, alt: !prev.alt }));
                               if (settings.keyClickSound) playClickSound('key');
                             }}
-                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${
-                              activeModifiers.alt 
-                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20' 
+                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${activeModifiers.alt
+                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20'
                                 : 'bg-[#1e1e1e] border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                            }`}
+                              }`}
                           >
                             Alt
                           </button>
-                          <button 
+                          <button
                             onClick={() => {
                               setActiveModifiers(prev => ({ ...prev, shift: !prev.shift }));
                               if (settings.keyClickSound) playClickSound('key');
                             }}
-                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${
-                              activeModifiers.shift 
-                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20' 
+                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${activeModifiers.shift
+                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20'
                                 : 'bg-[#1e1e1e] border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                            }`}
+                              }`}
                           >
                             Shift
                           </button>
-                          <button 
+                          <button
                             onClick={() => {
                               setActiveModifiers(prev => ({ ...prev, win: !prev.win }));
                               if (settings.keyClickSound) playClickSound('key');
                             }}
-                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${
-                              activeModifiers.win 
-                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20' 
+                            className={`h-9 rounded font-mono border transition-all flex items-center justify-center font-bold text-xs ${activeModifiers.win
+                                ? 'bg-blue-600 text-white border-blue-500 shadow shadow-blue-500/20'
                                 : 'bg-[#1e1e1e] border-neutral-800 text-neutral-300 hover:bg-neutral-800'
-                            }`}
+                              }`}
                           >
                             Win
                           </button>
@@ -878,37 +1037,37 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                       <div>
                         <div className="text-[10px] text-neutral-500 font-bold tracking-wider uppercase mb-1">常用系统组合键</div>
                         <div className="grid grid-cols-3 gap-1.5">
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['ctrl', 'alt', 'del'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-red-400 font-semibold"
                           >
                             Ctrl+Alt+Del
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['win', 'd'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-blue-400"
                           >
                             Win+D (桌面)
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['win', 'l'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-neutral-300"
                           >
                             Win+L (锁屏)
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['alt', 'tab'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-neutral-300"
                           >
                             Alt+Tab (切换)
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['ctrl', 'shift', 'esc'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-neutral-300"
                           >
                             Ctrl+Shift+Esc
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleShortcutClick(['alt', 'f4'])}
                             className="h-9 rounded bg-[#1e1e1e] border border-neutral-800 hover:bg-neutral-800 active:bg-blue-600/20 transition-all font-mono text-[10px] text-orange-400"
                           >
@@ -921,7 +1080,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                       <div>
                         <div className="text-[10px] text-neutral-500 font-bold tracking-wider uppercase mb-1">系统音量与多媒体控制</div>
                         <div className="grid grid-cols-6 gap-1">
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('volumedown')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-300"
                             title="音量减"
@@ -929,7 +1088,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <Volume1 className="w-3.5 h-3.5 text-blue-400 mb-0.5" />
                             <span>音量-</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('volumemute')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-300"
                             title="静音"
@@ -937,7 +1096,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <VolumeX className="w-3.5 h-3.5 text-red-400 mb-0.5" />
                             <span>静音</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('volumeup')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-300"
                             title="音量加"
@@ -945,7 +1104,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <Volume2 className="w-3.5 h-3.5 text-emerald-400 mb-0.5" />
                             <span>音量+</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('prevtrack')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-400"
                             title="上一首"
@@ -953,7 +1112,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <ChevronLeft className="w-3.5 h-3.5 text-neutral-400 mb-0.5" />
                             <span>上一首</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('playpause')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-400"
                             title="播放/暂停"
@@ -961,7 +1120,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <Play className="w-3 h-3 text-neutral-400 mb-0.5 fill-neutral-400" />
                             <span>播/暂</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleKeyClick('nexttrack')}
                             className="h-9 rounded bg-[#1a1c23] border border-neutral-800/80 hover:bg-neutral-800 flex flex-col items-center justify-center text-[9px] text-neutral-400"
                             title="下一首"
@@ -977,7 +1136,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 )}
 
                 {activeTab === 'keyboard' && (
-                  <motion.div 
+                  <motion.div
                     key="native-keyboard-view"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1005,7 +1164,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 )}
 
                 {activeTab === 'numpad' && (
-                  <motion.div 
+                  <motion.div
                     key="numpad"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1014,7 +1173,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                   >
                     {/* Implements exact keypad of Image 2 */}
                     <div className="grid grid-cols-7 gap-1 h-full text-[10px]">
-                      
+
                       {/* Row 1 */}
                       <button onClick={() => handleKeyClick('Escape')} className="h-10 rounded bg-[#2a2a2a] hover:bg-[#333] active:bg-emerald-600/30 text-neutral-200 font-bold border border-neutral-800">Esc</button>
                       <button onClick={() => handleKeyClick('Tab')} className="h-10 rounded bg-[#2a2a2a] hover:bg-[#333] active:bg-emerald-600/30 text-neutral-200 font-bold border border-neutral-800">Tab</button>
@@ -1088,10 +1247,10 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                         <span className="text-[7px] block text-neutral-500 leading-none">F12</span>
                         <span>3</span>
                       </button>
-                      
+
                       {/* Vertical Enter Button */}
-                      <button 
-                        onClick={() => handleKeyClick('Enter')} 
+                      <button
+                        onClick={() => handleKeyClick('Enter')}
                         className="row-span-2 h-[84px] rounded bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold flex flex-col justify-center items-center border border-emerald-700 cursor-pointer text-[9px]"
                       >
                         <span>enter</span>
@@ -1110,7 +1269,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                 )}
 
                 {activeTab === 'settings' && (
-                  <motion.div 
+                  <motion.div
                     key="settings"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1118,17 +1277,17 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                     className="flex-1 bg-neutral-900 text-neutral-200 flex flex-col text-xs divide-y divide-neutral-800 text-[11px] overflow-y-auto"
                   >
                     {/* Settings Panel matching Image 5 */}
-                    
+
                     {/* Section 1: Core Toggles */}
                     <div className="p-2 flex flex-col gap-1 bg-neutral-950/20">
                       <div className="flex justify-between items-center py-1 px-2 hover:bg-white/5 rounded">
                         <span className="text-neutral-300">调整面板顺序</span>
                         <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />
                       </div>
-                      
+
                       <div className="flex justify-between items-center py-1 px-2 hover:bg-white/5 rounded">
                         <span className="text-neutral-300">鼠标按钮</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('showMouseButtons', !settings.showMouseButtons)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.showMouseButtons ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1141,7 +1300,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">空鼠按钮</span>
                           <span className="text-[8px] text-neutral-500">倾斜手机来移动光标</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('lockRotation', !settings.lockRotation)}
                           className="w-9 h-5 rounded-full p-0.5 bg-neutral-800/80 border border-neutral-700/60"
                         >
@@ -1151,7 +1310,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
                       <div className="flex justify-between items-center py-1 px-2 hover:bg-white/5 rounded">
                         <span className="text-neutral-300">单手滑动条</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('showTouchFeedback', !settings.showTouchFeedback)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.showTouchFeedback ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1164,7 +1323,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">左手模式</span>
                           <span className="text-[8px] text-neutral-500">翻转鼠标布局和控制方式</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('leftHandMode', !settings.leftHandMode)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.leftHandMode ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1176,7 +1335,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                     {/* Section 2: Touchpad Group */}
                     <div className="p-3 flex flex-col gap-2">
                       <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider mb-0.5">触控板</span>
-                      
+
                       {/* Tracking Speed */}
                       <div className="flex flex-col gap-1">
                         <div className="flex justify-between items-center px-1">
@@ -1187,10 +1346,10 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <span>快</span>
                           </div>
                         </div>
-                        <input 
-                          type="range" 
-                          min={1} 
-                          max={10} 
+                        <input
+                          type="range"
+                          min={1}
+                          max={10}
                           value={settings.trackingSpeed}
                           onChange={(e) => updateSetting('trackingSpeed', parseInt(e.target.value))}
                           className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg cursor-pointer"
@@ -1207,10 +1366,10 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                             <span>快</span>
                           </div>
                         </div>
-                        <input 
-                          type="range" 
-                          min={1} 
-                          max={10} 
+                        <input
+                          type="range"
+                          min={1}
+                          max={10}
                           value={settings.scrollingSpeed}
                           onChange={(e) => updateSetting('scrollingSpeed', parseInt(e.target.value))}
                           className="w-full accent-emerald-500 h-1 bg-neutral-800 rounded-lg cursor-pointer"
@@ -1223,7 +1382,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">滚动方向: 自然式</span>
                           <span className="text-[8px] text-neutral-500">内容随手指移动而滚动</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('naturalScrolling', !settings.naturalScrolling)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.naturalScrolling ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1240,10 +1399,10 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                     {/* Section 3: Inputs */}
                     <div className="p-3 flex flex-col gap-2">
                       <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider mb-0.5">输入</span>
-                      
+
                       <div className="flex justify-between items-center py-1 px-1">
                         <span className="text-neutral-300">显示输入反馈</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('showTouchFeedback', !settings.showTouchFeedback)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.showTouchFeedback ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1256,7 +1415,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">拼写缓冲</span>
                           <span className="text-[8px] text-neutral-500">缓冲输入内容，按回车键发送</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('preventSleep', !settings.preventSleep)}
                           className="w-9 h-5 rounded-full p-0.5 bg-neutral-800/80 border border-neutral-700/60"
                         >
@@ -1274,7 +1433,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">使用音量按钮</span>
                           <span className="text-[8px] text-neutral-500">用手机按钮控制电脑音量</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('preventSleep', !settings.preventSleep)}
                           className="w-9 h-5 rounded-full p-0.5 bg-neutral-800/80 border border-neutral-700/60"
                         >
@@ -1284,7 +1443,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
                       <div className="flex justify-between items-center py-1 px-1">
                         <span className="text-neutral-300">点击音效</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('keyClickSound', !settings.keyClickSound)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.keyClickSound ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1297,7 +1456,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
                           <span className="text-neutral-300 block">自动重连</span>
                           <span className="text-[8px] text-neutral-500">启动时重新连接上次的电脑</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => updateSetting('preventSleep', !settings.preventSleep)}
                           className="w-9 h-5 rounded-full p-0.5 bg-neutral-800/80 border border-neutral-700/60"
                         >
@@ -1307,7 +1466,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
                       <div className="flex justify-between items-center py-1 px-1">
                         <span className="text-neutral-300">防止屏幕休眠</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('preventSleep', !settings.preventSleep)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.preventSleep ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
@@ -1317,7 +1476,7 @@ export default function PhoneClient({ socketUrl, defaultPin = '1111', onSendMess
 
                       <div className="flex justify-between items-center py-1 px-1">
                         <span className="text-neutral-300">锁定旋转</span>
-                        <button 
+                        <button
                           onClick={() => updateSetting('lockRotation', !settings.lockRotation)}
                           className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${settings.lockRotation ? 'bg-emerald-500' : 'bg-neutral-800'}`}
                         >
