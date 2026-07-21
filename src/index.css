@@ -6,3 +6,17 @@
   --font-display: "Outfit", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
+.mobile-viewport-lock,
+.mobile-viewport-lock body,
+.mobile-viewport-lock #root {
+  overflow: hidden !important;
+  height: 100% !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  touch-action: none;
+}

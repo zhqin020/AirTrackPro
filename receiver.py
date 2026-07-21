@@ -22,6 +22,55 @@ except ImportError:
     print("Warning: 'pyautogui' package is missing. Mouse & Keyboard simulation will only be printed.")
     pyautogui = None
 
+def force_unhide_cursor():
+    """Forces the operating system to show the mouse cursor if hidden by typing."""
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            pt = POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            # 1. Absolute mouse move via SetCursorPos
+            ctypes.windll.user32.SetCursorPos(pt.x + 1, pt.y + 1)
+            ctypes.windll.user32.SetCursorPos(pt.x, pt.y)
+            # 2. Relative hardware event via mouse_event
+            # MOUSEEVENTF_MOVE = 0x0001
+            ctypes.windll.user32.mouse_event(0x0001, 1, 1, 0, 0)
+            ctypes.windll.user32.mouse_event(0x0001, -1, -1, 0, 0)
+        except Exception:
+            pass
+    elif sys.platform == "darwin":
+        try:
+            from AppKit import NSCursor
+            NSCursor.unhide()
+        except Exception:
+            pass
+        try:
+            import Quartz
+            Quartz.CGDisplayShowCursor(0)
+        except Exception:
+            pass
+
+def map_key(key: str) -> str:
+    """Maps Web Keyboard events (like ArrowLeft, PageDown) to PyAutoGUI key strings."""
+    k_lower = key.lower()
+    if k_lower == "arrowleft":
+        return "left"
+    elif k_lower == "arrowright":
+        return "right"
+    elif k_lower == "arrowup":
+        return "up"
+    elif k_lower == "arrowdown":
+        return "down"
+    elif k_lower == "pageup":
+        return "pgup"
+    elif k_lower == "pagedown":
+        return "pgdn"
+    elif k_lower == "escape":
+        return "esc"
+    return k_lower
+
 async def receiver_client(server_url, pin):
     print(f"Connecting to wireless touchpad server: {server_url} ...")
     
@@ -66,6 +115,7 @@ async def receiver_client(server_url, pin):
                         
                         if pyautogui:
                             pyautogui.moveRel(move_x, move_y, duration=0)
+                            force_unhide_cursor()
                         else:
                             print(f"[Simulated Mouse Move] dx: {move_x}, dy: {move_y}")
 
@@ -81,6 +131,7 @@ async def receiver_client(server_url, pin):
                                 pyautogui.mouseDown(button=btn)
                             elif action == "up":
                                 pyautogui.mouseUp(button=btn)
+                            force_unhide_cursor()
 
                     elif event_type == "mouse-scroll":
                         amount = data.get("dy", 0)
@@ -88,6 +139,7 @@ async def receiver_client(server_url, pin):
                         if pyautogui:
                             # Windows scrolling amount is typically multiplied by 100 or 120
                             pyautogui.scroll(int(amount * 20))
+                            force_unhide_cursor()
 
                     elif event_type == "key-press":
                         key = data.get("key", "")
@@ -97,14 +149,15 @@ async def receiver_client(server_url, pin):
                         print(f"[Remote Action] Keyboard Input -> key: {key}")
                         if pyautogui:
                             # Map special keys to pyautogui keys
-                            key_lower = key.lower()
+                            key_lower = map_key(key)
+
                             if key_lower == "backspace":
                                 pyautogui.press("backspace")
-                            elif key_lower == "enter" or key_lower == "return":
+                            elif key_lower in ("enter", "return"):
                                 pyautogui.press("enter")
                             elif key_lower == "tab":
                                 pyautogui.press("tab")
-                            elif key_lower == "escape" or key_lower == "esc":
+                            elif key_lower in ("escape", "esc"):
                                 pyautogui.press("esc")
                             elif key_lower == "space":
                                 pyautogui.press("space")
@@ -118,7 +171,7 @@ async def receiver_client(server_url, pin):
                         print(f"[Remote Action] Shortcut Press -> keys: {keys}")
                         if pyautogui:
                             # Triggers hotkeys e.g. pyautogui.hotkey('ctrl', 'c')
-                            pyautogui.hotkey(*[k.lower() for k in keys])
+                            pyautogui.hotkey(*[map_key(k) for k in keys])
 
                 except json.JSONDecodeError:
                     print(f"Failed to parse incoming packet: {message}")

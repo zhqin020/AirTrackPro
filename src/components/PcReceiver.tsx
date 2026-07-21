@@ -732,8 +732,8 @@ export default function PcReceiver({ socketUrl, pin = '1111', onDirectControlReg
                                 playClickSound('click');
                               }}
                               className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all border ${customIp === ip
-                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                                : 'bg-[#161922] text-slate-400 hover:text-slate-200 border-white/5'
+                                  ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                                  : 'bg-[#161922] text-slate-400 hover:text-slate-200 border-white/5'
                                 }`}
                             >
                               {ip}

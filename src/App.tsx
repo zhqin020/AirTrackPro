@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PhoneClient from './components/PhoneClient';
 import PcReceiver from './components/PcReceiver';
-import { 
-  Tv, 
-  Smartphone, 
-  Cpu, 
-  Sparkles, 
-  Wifi, 
-  Radio, 
-  Settings, 
-  Code2, 
+import {
+  Tv,
+  Smartphone,
+  Cpu,
+  Sparkles,
+  Wifi,
+  Radio,
+  Settings,
+  Code2,
   Heart,
   HelpCircle
 } from 'lucide-react';
@@ -31,12 +31,9 @@ export default function App() {
 
     // Detect if loaded directly on mobile to auto-set mobile screen mode
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
+
     if (isPhoneQuery || isMobile) {
       setViewMode('phone-only');
-    }
-
-    if (isPhoneQuery) {
       setIsScannedOnly(true);
     }
 
@@ -45,6 +42,20 @@ export default function App() {
     const host = window.location.host;
     setWsUrl(`${protocol}//${host}/ws`);
   }, []);
+
+  useEffect(() => {
+    if (isScannedOnly) {
+      document.documentElement.classList.add('mobile-viewport-lock');
+      document.body.classList.add('mobile-viewport-lock');
+    } else {
+      document.documentElement.classList.remove('mobile-viewport-lock');
+      document.body.classList.remove('mobile-viewport-lock');
+    }
+    return () => {
+      document.documentElement.classList.remove('mobile-viewport-lock');
+      document.body.classList.remove('mobile-viewport-lock');
+    };
+  }, [isScannedOnly]);
 
   const handleRegisterDirectControl = (cb: (packet: any) => void) => {
     directControlCallbackRef.current = cb;
@@ -58,7 +69,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0A0C10] text-slate-300 flex flex-col font-sans select-none">
-      
+
       {/* Universal Head Header Bar */}
       {!isScannedOnly && (
         <header className="h-auto sm:h-20 py-4 sm:py-0 px-8 flex flex-col sm:flex-row items-center justify-between border-b border-white/5 bg-[#0F1117] gap-4 select-none z-50 sticky top-0 backdrop-blur-md">
@@ -81,21 +92,21 @@ export default function App() {
 
           {/* View Mode Switcher Toggles */}
           <div className="flex items-center bg-[#161922] p-1 rounded-2xl border border-white/5 self-stretch sm:self-auto text-xs">
-            <button 
+            <button
               onClick={() => setViewMode('dual')}
               className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${viewMode === 'dual' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
             >
               <Cpu className="w-3.5 h-3.5" />
               <span>双端联动测试</span>
             </button>
-            <button 
+            <button
               onClick={() => setViewMode('phone-only')}
               className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${viewMode === 'phone-only' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span>手机控制端</span>
             </button>
-            <button 
+            <button
               onClick={() => setViewMode('pc-only')}
               className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${viewMode === 'pc-only' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
             >
@@ -110,24 +121,24 @@ export default function App() {
       <main className={isScannedOnly ? "flex-1 flex flex-col w-full h-screen overflow-hidden" : "flex-1 flex flex-col justify-center items-center px-6 py-8 max-w-7xl mx-auto w-full"}>
         {wsUrl && (
           <div className="w-full flex flex-col items-center">
-            
+
             {/* View Mode 1: Dual Panel Debugging Mode (Recommended for testing) */}
             {viewMode === 'dual' && (
               <div className="w-full flex flex-col lg:flex-row justify-center items-stretch gap-8 lg:gap-12">
-                
+
                 {/* Left panel: Smartphone Client */}
                 <div className="flex flex-col items-center gap-4">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 bg-[#0F1117] border border-white/5 px-4 py-1.5 rounded-full shadow-md">
                     <Smartphone className="w-3.5 h-3.5 text-blue-400" />
                     触控手机 (左侧控制)
                   </span>
-                  
-                  <PhoneClient 
-                    socketUrl={wsUrl} 
+
+                  <PhoneClient
+                    socketUrl={wsUrl}
                     defaultPin="1111"
                     onDirectControl={handleDirectControl}
                   />
-                  
+
                   <p className="text-xs text-slate-500 mt-1 max-w-[280px] text-center leading-normal">
                     👆 <b>实时交互</b>: 拖拽绿色/蓝色区域控制右侧鼠标，在下方虚拟键盘打字、写字，右侧画板和记事本中将即刻呈现。
                   </p>
@@ -143,8 +154,8 @@ export default function App() {
                     电脑终端 (右侧接收)
                   </span>
 
-                  <PcReceiver 
-                    socketUrl={wsUrl} 
+                  <PcReceiver
+                    socketUrl={wsUrl}
                     pin="1111"
                     onDirectControlRegister={handleRegisterDirectControl}
                   />
@@ -156,8 +167,8 @@ export default function App() {
             {/* View Mode 2: Phone Client Only */}
             {viewMode === 'phone-only' && (
               <div className={isScannedOnly ? "w-full min-h-screen flex flex-col" : "flex flex-col items-center justify-center p-4"}>
-                <PhoneClient 
-                  socketUrl={wsUrl} 
+                <PhoneClient
+                  socketUrl={wsUrl}
                   defaultPin="1111"
                   isFullscreen={isScannedOnly}
                 />
@@ -172,8 +183,8 @@ export default function App() {
             {/* View Mode 3: PC Receiver Only */}
             {viewMode === 'pc-only' && (
               <div className="w-full flex justify-center items-center">
-                <PcReceiver 
-                  socketUrl={wsUrl} 
+                <PcReceiver
+                  socketUrl={wsUrl}
                   pin="1111"
                 />
               </div>
